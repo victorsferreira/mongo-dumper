@@ -1,0 +1,14 @@
+{
+  "name": "dumper",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index"
+  },
+  "author": "Victor Ferreira <victor.santos@oi.net.br>",
+  "license": "ISC",
+  "dependencies": {
+    "chalk": "^2.4.2"
+  }
+}
