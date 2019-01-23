@@ -16,6 +16,8 @@ const questions = [
     { domain: 'export', key: 'db', question: "What database should we import the data to? [Mandatory]", color: 'blue' },
     { domain: 'export', key: 'collection', question: "What collection should we import the data to? [Mandatory]", color: 'blue' },
     //
+    { domain: 'global', key: 'willImport', question: "An import operation should be performed? (defaults to 'Yes')", color: 'grey' },
+    //
     { domain: 'import', key: 'host', question: "What is the host of the destination server? (Defaults to 'localhost')", color: 'green' },
     { domain: 'import', key: 'port', question: "What is the port of the destination server? (Defaults to '27017')", color: 'green' },
     { domain: 'import', key: 'username', question: "What is the username of the destination server? (Defaults to 'none')", color: 'green' },
@@ -77,8 +79,11 @@ function askQuestion(text) {
 
 async function startQuestions() {
     const nextQuestion = questions.shift();
-    const answer = await askQuestion(text(nextQuestion.question, nextQuestion.color));
-    answers[nextQuestion.domain][nextQuestion.key] = answer;
+    const shouldAskQuestion = nextQuestion.domain !== 'import' || (nextQuestion.domain === 'import' && shouldImport());
+    if (shouldAskQuestion) {
+        const answer = await askQuestion(text(nextQuestion.question, nextQuestion.color));
+        answers[nextQuestion.domain][nextQuestion.key] = answer;
+    }
 
     if (questions.length) await startQuestions();
 }
@@ -136,7 +141,20 @@ function shouldKeepBackup() {
         return false;
     }
 
-    return false;
+    // Default
+    return true;
+}
+
+function shouldImport() {
+    const { willImport } = answers.global;
+    const will = willImport.toLowerCase();
+
+    if (will === 'n' || will === 'no' || will === '0') {
+        return false;
+    }
+
+    // Default
+    return true;
 }
 
 async function start() {
@@ -145,7 +163,7 @@ async function start() {
     const filename = resolveTempName(answers.export.collection);
 
     await shell(resolveExportCommand(filename));
-    await shell(resolveImportCommand(filename));
+    if (shouldImport()) await shell(resolveImportCommand(filename));
 
     print('Data migration was successfully performed!');
 
