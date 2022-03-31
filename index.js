@@ -10,11 +10,11 @@ const std = readline.createInterface({
 
 const questions = [
     { domain: 'export', key: 'host', question: "What is the host of the origin server? (Defaults to 'localhost')", color: 'blue' },
-    { domain: 'export', key: 'port', question: "What is the port of the destination server? (Defaults to '27017')", color: 'blue' },
-    { domain: 'export', key: 'username', question: "What is the username of the destination server? (Defaults to 'none')", color: 'blue' },
-    { domain: 'export', key: 'password', question: "What is the password of the destination server? (Defaults to 'none')", color: 'blue' },
-    { domain: 'export', key: 'db', question: "What database should we import the data to? [Mandatory]", color: 'blue' },
-    { domain: 'export', key: 'collection', question: "What collection should we import the data to? [Mandatory]", color: 'blue' },
+    { domain: 'export', key: 'port', question: "What is the port of the origin server? (Defaults to '27017')", color: 'blue' },
+    { domain: 'export', key: 'username', question: "What is the username of the origin server? (Defaults to 'none')", color: 'blue' },
+    { domain: 'export', key: 'password', question: "What is the password of the origin server? (Defaults to 'none')", color: 'blue' },
+    { domain: 'export', key: 'db', question: "What database should we export the data from? [Mandatory]", color: 'blue' },
+    { domain: 'export', key: 'collections', question: "What collections should we export the data from? [Mandatory]", color: 'blue' },
     //
     { domain: 'global', key: 'willImport', question: "An import operation should be performed? (defaults to 'Yes')", color: 'grey' },
     //
@@ -23,7 +23,7 @@ const questions = [
     { domain: 'import', key: 'username', question: "What is the username of the destination server? (Defaults to 'none')", color: 'green' },
     { domain: 'import', key: 'password', question: "What is the password of the destination server? (Defaults to 'none')", color: 'green' },
     { domain: 'import', key: 'db', question: () => { return `What database should we import the data to? (Defaults to '${answers.export.db}')` }, color: 'green' },
-    { domain: 'import', key: 'collection', question: () => { return `What collection should we import the data to? (Defaults to '${answers.export.collection}')` }, color: 'green' },
+    { domain: 'import', key: 'collections', question: () => { return `What collections should we import the data to? (Defaults to '${answers.export.collections}')` }, color: 'green' },
     //
     { domain: 'global', key: 'keepBackup', question: "Should keep the temporary export file as a backup? (defaults to 'Yes')", color: 'grey' }
 ];
@@ -88,45 +88,62 @@ async function startQuestions() {
     if (questions.length) await startQuestions();
 }
 
-function resolveExportCommand(filename) {
-    const { host, port, db, collection, password, username } = answers.export;
+async function executeExportCommand() {
+    const { host, port, db, collections, password, username } = answers.export;
+    const allCollections = collections.split(',').map(c => c.trim())
+    const filenames = [];
 
-    const cmd = ['mongoexport'];
-    cmd.push(`--host ${host || 'localhost'}`);
-    cmd.push(`--port ${port || '27017'}`);
+    for (const collection of allCollections) {
+        const filename = resolveTempName(collection);
+        filenames.push(filename);
 
-    if (!db || !collection) {
-        print('You must specify a database to export the data from', 'red');
-        process.exit();
+        const cmd = ['mongoexport'];
+        cmd.push(`--host ${host || 'localhost'}`);
+        cmd.push(`--port ${port || '27017'}`);
+
+        if (!db || !collection) {
+            print('You must specify a database to export the data from', 'red');
+            process.exit();
+        }
+
+        cmd.push(`--db ${db}`);
+        cmd.push(`--collection ${collection}`);
+
+        if (username) cmd.push(`--username ${username}`);
+        if (password) cmd.push(`--password "${password}"`);
+
+        cmd.push(`--out ${resolveTempFilePath(filename)}`);
+
+        const command = cmd.join(' ');
+        await shell(command);
     }
 
-    cmd.push(`--db ${db}`);
-    cmd.push(`--collection ${collection}`);
-
-    if (username) cmd.push(`--username ${username}`);
-    if (password) cmd.push(`--password "${password}"`);
-
-    cmd.push(`--out ${resolveTempFilePath(filename)}`);
-
-    return cmd.join(' ');
+    return filenames;
 }
 
-function resolveImportCommand(filename) {
-    const { host, port, db, collection, password, username } = answers.import;
+async function executeImportCommand(filenames) {
+    const { host, port, db, collections, password, username } = answers.import;
+    const allCollections = collections.split(',').map(c => c.trim())
 
-    const cmd = ['mongoimport'];
-    cmd.push(`--host ${host || 'localhost'}`);
-    cmd.push(`--port ${port || '27017'}`);
+    for (const key in allCollections) {
+        const collection = allCollections[key];
+        const filename = filenames[key];
 
-    cmd.push(`--db ${db || answers.export.db}`);
-    cmd.push(`--collection ${collection || answers.export.collection}`);
+        const cmd = ['mongoimport'];
+        cmd.push(`--host ${host || 'localhost'}`);
+        cmd.push(`--port ${port || '27017'}`);
 
-    if (username) cmd.push(`--username ${username}`);
-    if (password) cmd.push(`--password "${password}"`);
+        cmd.push(`--db ${db || answers.export.db}`);
+        cmd.push(`--collection ${collection || answers.export.collection}`);
 
-    cmd.push(`--file ${resolveTempFilePath(filename)}`);
+        if (username) cmd.push(`--username ${username}`);
+        if (password) cmd.push(`--password "${password}"`);
 
-    return cmd.join(' ');
+        cmd.push(`--file ${resolveTempFilePath(filename)}`);
+
+        const command = cmd.join(' ');
+        await shell(command);
+    }
 }
 
 function resolveTempFilePath(filename) {
@@ -160,16 +177,14 @@ function shouldImport() {
 async function start() {
     await startQuestions();
 
-    const filename = resolveTempName(answers.export.collection);
-
-    await shell(resolveExportCommand(filename));
-    if (shouldImport()) await shell(resolveImportCommand(filename));
+    const filenames = await executeExportCommand();
+    if (shouldImport()) await executeImportCommand(filenames);
 
     print('Data migration was successfully performed!');
 
     if (!shouldKeepBackup()) {
         print('Removing temporary export file');
-        removeFile(filename);
+        for(const filename of filenames) await removeFile(filename);
     }
 
     process.exit();
